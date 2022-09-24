@@ -263,7 +263,7 @@ public struct LogstashLogHandler: LogHandler {
         // Write size of the log data
         Self.byteBuffer?.writeInteger(logData.count)
         // Write actual log data to log store
-        Self.byteBuffer?.writeData(logData)
+        Self.byteBuffer?.writeBytes(logData.map { $0 })
 
         Self.byteBufferLock.unlock()
     }
