@@ -69,20 +69,44 @@ public struct LogstashLogHandler: LogHandler {
         }
     }
 
+    public var metadataProvider: Logger.MetadataProvider?
+
     /// Creates a `LogstashLogHandler` that directs its output to Logstash
     // Make sure that the `backgroundActivityLogger` is instanciated BEFORE `LoggingSystem.bootstrap(...)` is called (currently not even possible otherwise)
-    public init(label: String) {
+    public init(label: String, metadataProvider: Logger.MetadataProvider? = nil) {
         // If LogstashLogHandler was not yet set up, abort
         guard let _ = Self.hostname else {
             fatalError(Error.notYetSetup.rawValue)
         }
         
         self.label = label
-        
+        self.metadataProvider = metadataProvider
+
         // Set a "super-secret" metadata value to validate that the backgroundActivityLogger
         // doesn't use the LogstashLogHandler as a logging backend
         // Currently, this behavior isn't even possible in production, but maybe in future versions of the swift-log package
         self[metadataKey: "super-secret-is-a-logstash-loghandler"] = .string("true")
+    }
+
+    internal static func prepareMetadata(base: Logger.Metadata, provider: Logger.MetadataProvider?, explicit: Logger.Metadata?) -> Logger.Metadata? {
+        var metadata = base
+
+        let provided = provider?.get() ?? [:]
+
+        guard !provided.isEmpty || !((explicit ?? [:]).isEmpty) else {
+            // all per-log-statement values are empty
+            return nil
+        }
+
+        if !provided.isEmpty {
+            metadata.merge(provided, uniquingKeysWith: { _, provided in provided })
+        }
+
+        if let explicit = explicit, !explicit.isEmpty {
+            metadata.merge(explicit, uniquingKeysWith: { _, explicit in explicit })
+        }
+
+        return metadata
     }
     
     /// Setup of the `LogstashLogHandler`, need to be called once before `LoggingSystem.bootstrap(...)` is called
@@ -150,8 +174,9 @@ public struct LogstashLogHandler: LogHandler {
         }
         
         let mergedMetadata = mergeMetadata(passedMetadata: metadata, file: file, function: function, line: line)
+        let metadata = Self.prepareMetadata(base: self.metadata, provider: metadataProvider, explicit: mergedMetadata)
 
-        guard let logData = encodeLogData(level: level, message: message, metadata: mergedMetadata) else {
+        guard let logData = encodeLogData(level: level, message: message, metadata: metadata ?? [:]) else {
             Self.backgroundActivityLogger?.log(
                 level: .warning,
                 "Error during encoding log data",
